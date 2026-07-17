@@ -21,3 +21,5 @@ export async function getPool(): Promise<sql.ConnectionPool> {
     }
     return globalWithSql._sqlPool;
 }
+
+export { sql };
