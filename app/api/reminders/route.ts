@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/app/lib/prisma';
 import { sendReminderEmail, ReminderPayload } from '@/app/lib/mailer';
+import { sendReminderWhatsApp } from '@/app/lib/whatsapp';
 
 const fmt = (d: Date | null | undefined) =>
   d ? d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : null;
@@ -103,15 +104,39 @@ export async function POST(req: Request) {
       })),
     };
 
-    const sentTo = await sendReminderEmail(payload, overrideTo);
-    const total  = payload.criticalHearings.length + payload.upcomingHearings.length +
-                   payload.expiringContracts.length + payload.expiringIP.length;
+    const total = payload.criticalHearings.length + payload.upcomingHearings.length +
+                  payload.expiringContracts.length + payload.expiringIP.length;
 
-    return NextResponse.json({ sent: true, to: sentTo, itemCount: total });
+    let emailTo: string | undefined;
+    let emailError: string | undefined;
+    try {
+      emailTo = await sendReminderEmail(payload, overrideTo);
+    } catch (err: any) {
+      console.error('Reminder email failed:', err);
+      emailError = err?.message ?? 'Failed to send reminder email';
+    }
+
+    let whatsappTo: string[] | undefined;
+    let whatsappError: string | undefined;
+    try {
+      whatsappTo = await sendReminderWhatsApp(payload);
+    } catch (err: any) {
+      console.error('Reminder WhatsApp send failed:', err);
+      whatsappError = err?.message ?? 'Failed to send WhatsApp reminder';
+    }
+
+    if (!emailTo && !whatsappTo) {
+      return NextResponse.json(
+        { error: emailError ?? whatsappError ?? 'Failed to send reminders' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ sent: true, to: emailTo, emailError, whatsappTo, whatsappError, itemCount: total });
   } catch (err: any) {
     console.error('Reminders POST error:', err);
     return NextResponse.json(
-      { error: err?.message ?? 'Failed to send reminder email' },
+      { error: err?.message ?? 'Failed to send reminder' },
       { status: 500 }
     );
   }
