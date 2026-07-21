@@ -9,10 +9,17 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@ant-design/icons": "^6.3.2",
+    "@prisma/client": "5.22.0",
     "ag-grid-community": "^36.0.1",
     "ag-grid-react": "^36.0.1",
+    "antd": "^6.5.1",
+    "axios": "^1.18.1",
     "bcryptjs": "^3.0.3",
     "dotenv": "^17.4.2",
+    "echarts": "^6.1.0",
+    "echarts-for-react": "^3.0.6",
+    "googleapis": "^173.0.0",
     "jose": "^6.2.3",
     "jsonwebtoken": "^9.0.3",
     "mssql": "^12.7.0",
@@ -21,7 +28,8 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "twilio": "^6.0.2",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -33,7 +41,13 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
+    "prisma": "5.22.0",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "allowScripts": {
+    "@prisma/client@5.22.0": true,
+    "@prisma/engines@5.22.0": true,
+    "prisma@5.22.0": true
   }
 }

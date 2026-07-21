@@ -1,0 +1,187 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlserver"
+  url      = env("DATABASE_URL")
+}
+
+model Court {
+  CourtID   Int      @id @default(autoincrement())
+  CourtName String   @db.NVarChar(200)
+  Cases     Case[]
+
+  @@map("Courts")
+}
+
+model LitigationCategory {
+  CategoryID   Int    @id @default(autoincrement())
+  CategoryName String @db.NVarChar(200)
+  Cases        Case[]
+
+  @@map("LitigationCategories")
+}
+
+model ContractCategory {
+  CategoryID   Int        @id @default(autoincrement())
+  CategoryName String     @db.NVarChar(200)
+  Contracts    Contract[]
+
+  @@map("ContractCategories")
+}
+
+model Company {
+  CompanyID   Int        @id @default(autoincrement())
+  CompanyName String     @db.NVarChar(200)
+  Contracts   Contract[]
+  IPRecords   IPRecord[]
+
+  @@map("Companies")
+}
+
+model Department {
+  DepartmentID   Int        @id @default(autoincrement())
+  DepartmentName String     @db.NVarChar(200)
+  Contracts      Contract[]
+
+  @@map("Departments")
+}
+
+model Lawyer {
+  LawyerID   Int     @id @default(autoincrement())
+  LawyerName String  @db.NVarChar(200)
+  FirmName   String? @db.NVarChar(200)
+  LawyerType String  @db.NVarChar(50)
+
+  CasesAsExternal   Case[]     @relation("CaseExternalCounsel")
+  CasesAsInternal   Case[]     @relation("CaseInternalAssociate")
+  ContractsExternal Contract[] @relation("ContractExternalParty")
+  ContractsInternal Contract[] @relation("ContractInternalAssociate")
+  IPRecordsExternal IPRecord[] @relation("IPExternalCounsel")
+  IPRecordsInternal IPRecord[] @relation("IPInternalAssociate")
+
+  @@map("Lawyers")
+}
+
+model Case {
+  CaseID              Int       @id @default(autoincrement())
+  CaseTitle           String    @db.NVarChar(500)
+  CaseNumber          String    @unique @db.NVarChar(100)
+  CourtID             Int?
+  Summary             String?   @db.NVarChar(Max)
+  ByAgainst           String?   @db.NVarChar(50)
+  ExternalCounselID   Int?
+  InternalAssociateID Int?
+  DateOfInstitution   DateTime? @db.Date
+  CategoryID          Int?
+  AmountInvolved      Decimal?  @db.Decimal(18, 2)
+  LastHearingDate     DateTime? @db.Date
+  NextHearingDate     DateTime? @db.Date
+  HearingStatus       String?   @db.NVarChar(200)
+  InterimStayOrder    Boolean   @default(false)
+  DateOfStayOrder     DateTime? @db.Date
+  DateOfDisposal      DateTime? @db.Date
+  ProfessionalCost    Decimal?  @db.Decimal(18, 2)
+  Remarks             String?   @db.NVarChar(Max)
+  Status              String    @default("Pending") @db.NVarChar(50)
+  CreatedAt           DateTime  @default(now())
+  UpdatedAt           DateTime  @default(now()) @updatedAt
+
+  Court             Court?             @relation(fields: [CourtID], references: [CourtID], onDelete: NoAction, onUpdate: NoAction)
+  Category          LitigationCategory? @relation(fields: [CategoryID], references: [CategoryID], onDelete: NoAction, onUpdate: NoAction)
+  ExternalCounsel   Lawyer?            @relation("CaseExternalCounsel", fields: [ExternalCounselID], references: [LawyerID], onDelete: NoAction, onUpdate: NoAction)
+  InternalAssociate Lawyer?            @relation("CaseInternalAssociate", fields: [InternalAssociateID], references: [LawyerID], onDelete: NoAction, onUpdate: NoAction)
+  Attachments       CaseAttachment[]
+
+  @@map("Cases")
+}
+
+model CaseAttachment {
+  AttachmentID  Int      @id @default(autoincrement())
+  CaseID        Int?
+  DocumentType  String   @db.NVarChar(200)
+  DriveFileID   String?  @db.NVarChar(500)
+  DriveFileLink String?  @db.NVarChar(1000)
+  UploadedAt    DateTime @default(now())
+  Case          Case?    @relation(fields: [CaseID], references: [CaseID], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("CaseAttachments")
+}
+
+model Contract {
+  ContractID          Int       @id @default(autoincrement())
+  ContractTitle       String    @db.NVarChar(500)
+  FirstParty          String    @db.NVarChar(300)
+  SecondParty         String    @db.NVarChar(300)
+  Summary             String?   @db.NVarChar(Max)
+  DepartmentID        Int?
+  CompanyID           Int?
+  ExternalPartyID     Int?
+  InternalAssociateID Int?
+  EffectiveDate       DateTime? @db.Date
+  CategoryID          Int?
+  DateOfSigning       DateTime? @db.Date
+  DateOfExpiry        DateTime? @db.Date
+  Status              String    @default("Ongoing") @db.NVarChar(50)
+  Remarks             String?   @db.NVarChar(Max)
+  CreatedAt           DateTime  @default(now())
+  UpdatedAt           DateTime  @default(now()) @updatedAt
+
+  Department        Department?      @relation(fields: [DepartmentID], references: [DepartmentID], onDelete: NoAction, onUpdate: NoAction)
+  Company           Company?         @relation(fields: [CompanyID], references: [CompanyID], onDelete: NoAction, onUpdate: NoAction)
+  ExternalParty     Lawyer?          @relation("ContractExternalParty", fields: [ExternalPartyID], references: [LawyerID], onDelete: NoAction, onUpdate: NoAction)
+  InternalAssociate Lawyer?          @relation("ContractInternalAssociate", fields: [InternalAssociateID], references: [LawyerID], onDelete: NoAction, onUpdate: NoAction)
+  Category          ContractCategory? @relation(fields: [CategoryID], references: [CategoryID], onDelete: NoAction, onUpdate: NoAction)
+  Attachments       ContractAttachment[]
+
+  @@map("Contracts")
+}
+
+model ContractAttachment {
+  AttachmentID  Int       @id @default(autoincrement())
+  ContractID    Int?
+  DocumentType  String    @db.NVarChar(200)
+  DriveFileID   String?   @db.NVarChar(500)
+  DriveFileLink String?   @db.NVarChar(1000)
+  UploadedAt    DateTime  @default(now())
+  Contract      Contract? @relation(fields: [ContractID], references: [ContractID], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("ContractAttachments")
+}
+
+model IPRecord {
+  IPID                Int       @id @default(autoincrement())
+  IPTitle             String    @db.NVarChar(500)
+  CompanyID           Int?
+  Category            String    @db.NVarChar(100)
+  ExternalCounselID   Int?
+  InternalAssociateID Int?
+  EffectiveDate       DateTime? @db.Date
+  DateOfIssuance      DateTime? @db.Date
+  DateOfExpiry        DateTime? @db.Date
+  Status              String    @default("Active") @db.NVarChar(50)
+  ProfessionalFees    Decimal?  @db.Decimal(18, 2)
+  Remarks             String?   @db.NVarChar(Max)
+  CreatedAt           DateTime  @default(now())
+  UpdatedAt           DateTime  @default(now()) @updatedAt
+
+  Company           Company? @relation(fields: [CompanyID], references: [CompanyID], onDelete: NoAction, onUpdate: NoAction)
+  ExternalCounsel   Lawyer?  @relation("IPExternalCounsel", fields: [ExternalCounselID], references: [LawyerID], onDelete: NoAction, onUpdate: NoAction)
+  InternalAssociate Lawyer?  @relation("IPInternalAssociate", fields: [InternalAssociateID], references: [LawyerID], onDelete: NoAction, onUpdate: NoAction)
+  Attachments       IPAttachment[]
+
+  @@map("IPRecords")
+}
+
+model IPAttachment {
+  AttachmentID  Int       @id @default(autoincrement())
+  IPID          Int?
+  DocumentType  String    @db.NVarChar(200)
+  DriveFileID   String?   @db.NVarChar(500)
+  DriveFileLink String?   @db.NVarChar(1000)
+  UploadedAt    DateTime  @default(now())
+  IPRecord      IPRecord? @relation(fields: [IPID], references: [IPID], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("IPAttachments")
+}

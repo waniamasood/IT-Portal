@@ -1,304 +1,278 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
+import axios from 'axios';
+import { message } from 'antd';
 
-interface Case {
-  CaseID: number;
-  CaseNumber: string;
-  CaseTitle: string;
-  CourtName: string;
-  CategoryName: string;
-  CounselName: string;
-  InternalAssociateName: string;
-  Status: string;
-  LastHearingDate: string | null;
-  NextHearingDate: string | null;
-}
+interface Stats { total:number; pending:number; disposed:number; hearingsUpcoming:number; hearingsCritical:number; totalAmountInvolved:number; totalProfessionalCost:number; }
+interface CStats { total:number; ongoing:number; expired:number; expiringSoon:number; expiringCritical:number; }
+interface IPStats { total:number; active:number; expired:number; expiringSoon:number; trademarks:number; patents:number; copyrights:number; }
 
-interface Stats {
-  total: number;
-  pending: number;
-  disposed: number;
-  alerts: number;
-}
+const fmtPKR = (n:number) => n >= 1e7 ? `₨${(n/1e7).toFixed(1)}Cr` : n >= 1e5 ? `₨${(n/1e5).toFixed(1)}L` : `₨${n.toLocaleString()}`;
 
-function formatDate(d: string | null) {
-  if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-}
+export default function OverviewPage() {
+  const [lit,      setLit]     = useState<Stats|null>(null);
+  const [con,      setCon]     = useState<CStats|null>(null);
+  const [ip,       setIP]      = useState<IPStats|null>(null);
+  const [sending,    setSending]   = useState(false);
+  const [reminderTo, setReminderTo] = useState('');
+  const [msgApi,     msgCtx]        = message.useMessage();
 
-function daysUntil(d: string | null): number {
-  if (!d) return 999;
-  const diff = new Date(d).getTime() - new Date().setHours(0,0,0,0);
-  return Math.ceil(diff / (1000 * 60 * 60 * 24));
-}
-
-function statusClass(s: string) {
-  if (s === 'Disposed')           return 'sp-success';
-  if (s === 'Stay Order')         return 'sp-critical';
-  if (s === 'Hearing Scheduled')  return 'sp-warning';
-  return 'sp-warning';
-}
-
-function AlertPill({ days, caseTitle, court }: { days: number; caseTitle: string; court: string }) {
-  const type = days <= 1 ? 'critical' : days <= 3 ? 'warning' : 'info';
-  const label = days <= 0 ? 'Today' : days === 1 ? 'Tomorrow' : `${days} Days`;
-  return (
-    <div className={`ab-pill ${type}`}>
-      <div className="ab-dot" />
-      {label} — {caseTitle} ({court})
-    </div>
-  );
-}
-
-export default function DashboardPage() {
-  const [cases, setCases]   = useState<Case[]>([]);
-  const [stats, setStats]   = useState<Stats>({ total:0, pending:0, disposed:0, alerts:0 });
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState('all');
-  const [courtFilter, setCourtFilter] = useState('');
-
-  const fetchCases = useCallback(async () => {
-    setLoading(true);
+  const sendReminder = async () => {
+    setSending(true);
     try {
-      const params = new URLSearchParams();
-      if (search)      params.set('search', search);
-      if (courtFilter) params.set('court', courtFilter);
-      if (filter === 'pending')  params.set('status', 'Pending');
-      if (filter === 'disposed') params.set('status', 'Disposed');
-
-      const res  = await fetch(`/api/cases?${params.toString()}`);
-      const data = await res.json();
-      const all: Case[] = data.cases || [];
-
-      setCases(all);
-      setStats({
-        total:    all.length,
-        pending:  all.filter(c => c.Status === 'Pending' || c.Status === 'Hearing Scheduled' || c.Status === 'Stay Order').length,
-        disposed: all.filter(c => c.Status === 'Disposed').length,
-        alerts:   all.filter(c => daysUntil(c.NextHearingDate) <= 3).length,
-      });
-    } catch (err) {
-      console.error(err);
+      const { data } = await axios.post('/api/reminders', reminderTo ? { to: reminderTo } : {});
+      msgApi.success(`Reminder sent to ${data.to} — ${data.itemCount} item${data.itemCount !== 1 ? 's' : ''} included`);
+    } catch (err: any) {
+      msgApi.error(err?.response?.data?.error ?? 'Failed to send reminder email');
     } finally {
-      setLoading(false);
+      setSending(false);
     }
-  }, [search, filter, courtFilter]);
+  };
 
-  useEffect(() => { fetchCases(); }, [fetchCases]);
-
-  const upcomingAlerts = cases
-    .filter(c => daysUntil(c.NextHearingDate) <= 7)
-    .sort((a,b) => daysUntil(a.NextHearingDate) - daysUntil(b.NextHearingDate))
-    .slice(0, 6);
-
-  const kpis = [
-    { label:'Total Cases',    value: stats.total,    sub:'All courts',       color:'#60a5fa' },
-    { label:'Pending',        value: stats.pending,  sub:'Active cases',     color:'#fbbf24' },
-    { label:'Disposed',       value: stats.disposed, sub:'Resolved cases',   color:'#4ade80' },
-    { label:'Hearing Alerts', value: stats.alerts,   sub:'Next 3 days',      color:'#f87171' },
-  ];
-
-  const courts = ['Supreme Court','High Court','District Court','District Court Islamabad'];
+  useEffect(() => {
+    axios.get('/api/dashboard/litigation-stats').then(r => setLit(r.data)).catch(() => {});
+    axios.get('/api/dashboard/contracts-stats').then(r => setCon(r.data)).catch(() => {});
+    axios.get('/api/dashboard/ip-stats').then(r => setIP(r.data)).catch(() => {});
+  }, []);
 
   return (
     <>
       <style>{`
-        .pg { padding:16px 20px; background:var(--bg0); min-height:calc(100vh - 44px); }
-        .pg-head { display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:14px; }
-        .pg-title { font-size:18px; font-weight:800; color:var(--text); letter-spacing:-0.02em; }
-        .pg-sub   { font-size:11px; color:var(--text3); margin-top:3px; }
-        .pg-actions { display:flex; gap:7px; }
-        .btn { display:flex; align-items:center; gap:6px; padding:7px 14px; border-radius:7px; font-size:11px; font-weight:600; cursor:pointer; border:none; font-family:inherit; transition:all .15s; }
-        .btn-outline { background:transparent; color:var(--text2); border:1px solid var(--border2); }
-        .btn-outline:hover { border-color:var(--teal); color:var(--teal); }
-        .btn-primary { background:var(--teal); color:white; }
-        .btn-primary:hover { background:var(--teal2); }
+        .ov-root{padding:24px;min-height:100%}
+        .ov-hero{
+          background:linear-gradient(135deg,#1D1C55 0%,#141435 50%,#0c0c20 100%);
+          border:1px solid #26264a;border-radius:12px;padding:28px 32px;
+          margin-bottom:24px;position:relative;overflow:hidden;
+        }
+        .ov-hero::before{
+          content:'';position:absolute;top:-30px;right:-30px;
+          width:200px;height:200px;border-radius:50%;
+          background:radial-gradient(circle,rgba(38,169,225,.15),transparent 70%);
+        }
+        .ov-hero-title{font-size:22px;font-weight:700;color:#fff;margin-bottom:4px}
+        .ov-hero-sub{font-size:13px;color:#94a3b8}
+        .ov-hero-meta{display:flex;gap:16px;margin-top:12px}
+        .ov-hero-badge{
+          padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;
+          background:rgba(38,169,225,.15);color:#26A9E1;border:1px solid rgba(38,169,225,.3);
+        }
 
-        .kpi-row { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:12px; }
-        .kpi { background:var(--bg2); border:1px solid var(--border); border-radius:10px; padding:14px 16px; position:relative; overflow:hidden; }
-        .kpi-bar { position:absolute; top:0; left:0; right:0; height:3px; border-radius:10px 10px 0 0; }
-        .kpi-label { font-size:9px; font-weight:700; color:var(--text3); text-transform:uppercase; letter-spacing:.07em; }
-        .kpi-value { font-size:30px; font-weight:800; letter-spacing:-0.04em; line-height:1; margin:6px 0 3px; }
-        .kpi-sub   { font-size:10px; color:var(--text3); }
+        .ov-portals{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px}
+        .ov-portal-card{
+          background:#0e0e1e;border:1px solid #1e1e3a;border-radius:10px;padding:20px;
+          transition:border-color .2s;cursor:pointer;text-decoration:none;display:block;
+        }
+        .ov-portal-card:hover{border-color:#26A9E1}
+        .ov-portal-hd{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+        .ov-portal-ico{
+          width:38px;height:38px;border-radius:9px;
+          display:flex;align-items:center;justify-content:center;font-size:18px;
+        }
+        .ov-portal-name{font-size:14px;font-weight:700;color:#dde1e9}
+        .ov-portal-sub{font-size:11px;color:#4a5568;margin-top:1px}
+        .ov-portal-stats{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+        .ov-stat-box{background:#12122a;border-radius:7px;padding:12px}
+        .ov-stat-val{font-size:22px;font-weight:700;color:#dde1e9;line-height:1}
+        .ov-stat-lbl{font-size:10px;color:#4a5568;margin-top:3px}
+        .ov-stat-val.teal{color:#26A9E1}
+        .ov-stat-val.green{color:#4ade80}
+        .ov-stat-val.amber{color:#fb923c}
+        .ov-stat-val.red{color:#ef4444}
 
-        .alert-banner { background:var(--bg2); border:1px solid var(--border); border-radius:10px; padding:10px 14px; margin-bottom:12px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-        .ab-title { font-size:9px; font-weight:700; color:var(--text3); text-transform:uppercase; letter-spacing:.08em; flex-shrink:0; padding-right:10px; border-right:1px solid var(--border2); }
-        .ab-pills { display:flex; gap:6px; flex-wrap:wrap; }
-        .ab-pill { display:flex; align-items:center; gap:5px; padding:4px 10px; border-radius:5px; font-size:10px; font-weight:600; border:1px solid transparent; }
-        .ab-pill.critical { background:rgba(220,38,38,0.12); color:#f87171; border-color:rgba(220,38,38,0.25); }
-        .ab-pill.warning  { background:rgba(251,191,36,0.10); color:#fbbf24; border-color:rgba(251,191,36,0.22); }
-        .ab-pill.info     { background:rgba(38,169,225,0.10); color:var(--teal); border-color:rgba(38,169,225,0.22); }
-        .ab-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
-        .critical .ab-dot { background:#ef4444; }
-        .warning  .ab-dot { background:#f59e0b; }
-        .info     .ab-dot { background:var(--teal); }
-        .ab-none { font-size:11px; color:var(--text3); }
+        .ov-alerts-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:24px}
+        .ov-alert-card{
+          background:#0e0e1e;border-radius:10px;padding:18px;border:1px solid #1e1e3a;
+        }
+        .ov-alert-title{font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:12px;display:flex;align-items:center;gap:6px}
+        .ov-alert-big{font-size:36px;font-weight:800;margin-bottom:4px}
+        .ov-alert-desc{font-size:11px;color:#4a5568}
 
-        .table-card { background:var(--bg2); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
-        .table-toolbar { display:flex; align-items:center; gap:10px; padding:11px 14px; border-bottom:1px solid var(--border); background:var(--bg3); flex-wrap:wrap; }
-        .tt-title { font-size:11px; font-weight:700; color:var(--text); }
-        .tt-search { display:flex; align-items:center; gap:6px; background:var(--bg2); border:1px solid var(--border2); border-radius:6px; padding:5px 10px; font-size:10px; color:var(--text3); flex:1; min-width:180px; }
-        .tt-search input { background:none; border:none; outline:none; color:var(--text); font-size:11px; width:100%; font-family:inherit; }
-        .tt-search input::placeholder { color:var(--text3); }
-        .tt-select { background:var(--bg2); border:1px solid var(--border2); border-radius:6px; padding:5px 8px; font-size:10px; color:var(--text2); outline:none; cursor:pointer; font-family:inherit; }
-        .filter-chips { display:flex; gap:5px; }
-        .chip { padding:4px 10px; border-radius:5px; font-size:9px; font-weight:700; border:1px solid var(--border2); background:var(--bg2); color:var(--text3); cursor:pointer; font-family:inherit; }
-        .chip.on { background:var(--teal); color:white; border-color:var(--teal); }
-        .chip.danger { background:rgba(220,38,38,0.12); color:#f87171; border-color:rgba(220,38,38,0.25); }
+        .ov-footer{text-align:center;padding:20px;color:#2a2a4a;font-size:10.5px}
 
-        table.dt { width:100%; border-collapse:collapse; }
-        table.dt thead tr { background:var(--bg3); border-bottom:1px solid var(--border2); }
-        table.dt thead th { padding:8px 12px; font-size:9px; font-weight:700; color:var(--text3); text-align:left; text-transform:uppercase; letter-spacing:.06em; white-space:nowrap; }
-        table.dt tbody tr { border-bottom:1px solid var(--border); transition:background .1s; }
-        table.dt tbody tr:hover { background:rgba(255,255,255,0.03); }
-        table.dt tbody tr.hl-row { background:rgba(220,38,38,0.05); }
-        table.dt tbody td { padding:8px 12px; font-size:10px; color:var(--text2); vertical-align:middle; }
-        .case-id { color:var(--teal); font-weight:700; font-family:monospace; font-size:10px; }
-        .court-tag { font-size:8px; font-weight:700; padding:2px 7px; border-radius:3px; background:rgba(38,169,225,0.12); color:var(--teal); letter-spacing:.04em; white-space:nowrap; }
-        .status-pill { display:inline-flex; align-items:center; gap:4px; padding:3px 8px; border-radius:4px; font-size:9px; font-weight:700; }
-        .sp-critical { background:rgba(220,38,38,0.12); color:#f87171; }
-        .sp-warning  { background:rgba(251,191,36,0.10); color:#fbbf24; }
-        .sp-success  { background:rgba(74,222,128,0.10); color:#4ade80; }
-        .date-alert  { color:#f87171; font-weight:700; }
-        .action-btn  { padding:3px 9px; border-radius:4px; font-size:9px; font-weight:700; background:rgba(38,169,225,0.12); color:var(--teal); border:none; cursor:pointer; font-family:inherit; }
-        .action-btn:hover { background:rgba(38,169,225,0.22); }
-
-        .table-footer { display:flex; align-items:center; justify-content:space-between; padding:9px 14px; border-top:1px solid var(--border); background:var(--bg3); }
-        .tf-info { font-size:9px; color:var(--text3); }
-
-        .loading-row td { text-align:center; padding:32px; color:var(--text3); font-size:11px; }
-        .empty-row  td { text-align:center; padding:32px; color:var(--text3); font-size:11px; }
+        .ov-reminder-bar{
+          display:flex;align-items:center;justify-content:space-between;
+          background:#0e0e1e;border:1px solid #1e1e3a;border-radius:10px;
+          padding:14px 20px;margin-bottom:24px;
+        }
+        .ov-reminder-info{font-size:12px;color:#94a3b8}
+        .ov-reminder-info strong{color:#dde1e9;font-size:13px;display:block;margin-bottom:2px}
+        .ov-reminder-right{display:flex;align-items:center;gap:10px}
+        .ov-to-input{
+          background:#12122a;border:1px solid #26264a;border-radius:7px;
+          padding:8px 12px;font-size:13px;color:#dde1e9;width:240px;outline:none;
+        }
+        .ov-to-input::placeholder{color:#4a5568}
+        .ov-to-input:focus{border-color:#26A9E1}
+        .ov-send-btn{
+          background:#26A9E1;color:#fff;border:none;border-radius:7px;
+          padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;
+          display:flex;align-items:center;gap:8px;transition:background .2s;white-space:nowrap;
+        }
+        .ov-send-btn:hover{background:#1d8fc0}
+        .ov-send-btn:disabled{background:#1a1a3a;color:#4a5568;cursor:not-allowed}
       `}</style>
-
-      <div className="pg">
-        {/* HEADER */}
-        <div className="pg-head">
-          <div>
-            <div className="pg-title">Litigation Dashboard</div>
-            <div className="pg-sub">Legal Affairs Department · All Courts · Live Data</div>
-          </div>
-          <div className="pg-actions">
-            <button className="btn btn-outline">↓ Export Excel</button>
-            <button className="btn btn-primary" onClick={() => window.location.href='/cases/new'}>＋ New Case</button>
+      {msgCtx}
+      <div className="ov-root">
+        {/* HERO */}
+        <div className="ov-hero">
+          <div className="ov-hero-title">Gatronova Legal Management Portal</div>
+          <div className="ov-hero-sub">Centralised view across Litigation, Contracts, and Intellectual Property</div>
+          <div className="ov-hero-meta">
+            <span className="ov-hero-badge">⚖ Litigation</span>
+            <span className="ov-hero-badge">📄 Contracts</span>
+            <span className="ov-hero-badge">💡 IP Management</span>
           </div>
         </div>
 
-        {/* KPI CARDS */}
-        <div className="kpi-row">
-          {kpis.map(k => (
-            <div key={k.label} className="kpi">
-              <div className="kpi-bar" style={{background:k.color}}/>
-              <div className="kpi-label">{k.label}</div>
-              <div className="kpi-value" style={{color:k.color}}>
-                {loading ? '—' : k.value}
+        {/* THREE PORTALS */}
+        <div className="ov-portals">
+          {/* LITIGATION */}
+          <a href="/dashboard/litigation" className="ov-portal-card">
+            <div className="ov-portal-hd">
+              <div className="ov-portal-ico" style={{background:'rgba(29,28,85,.6)',border:'1px solid #26264a'}}>⚖</div>
+              <div>
+                <div className="ov-portal-name">Litigation</div>
+                <div className="ov-portal-sub">Active case management</div>
               </div>
-              <div className="kpi-sub">{k.sub}</div>
             </div>
-          ))}
+            <div className="ov-portal-stats">
+              <div className="ov-stat-box">
+                <div className="ov-stat-val teal">{lit?.total ?? '—'}</div>
+                <div className="ov-stat-lbl">Total Cases</div>
+              </div>
+              <div className="ov-stat-box">
+                <div className="ov-stat-val amber">{lit?.pending ?? '—'}</div>
+                <div className="ov-stat-lbl">Pending</div>
+              </div>
+              <div className="ov-stat-box">
+                <div className="ov-stat-val green">{lit?.disposed ?? '—'}</div>
+                <div className="ov-stat-lbl">Disposed</div>
+              </div>
+              <div className="ov-stat-box">
+                <div className={`ov-stat-val${(lit?.hearingsCritical ?? 0) > 0 ? ' red' : ''}`}>{lit?.hearingsUpcoming ?? '—'}</div>
+                <div className="ov-stat-lbl">Hearings (7d)</div>
+              </div>
+            </div>
+          </a>
+
+          {/* CONTRACTS */}
+          <a href="/dashboard/contracts" className="ov-portal-card">
+            <div className="ov-portal-hd">
+              <div className="ov-portal-ico" style={{background:'rgba(16,64,50,.6)',border:'1px solid #1e3a30'}}>📄</div>
+              <div>
+                <div className="ov-portal-name">Contracts</div>
+                <div className="ov-portal-sub">Contract lifecycle tracking</div>
+              </div>
+            </div>
+            <div className="ov-portal-stats">
+              <div className="ov-stat-box">
+                <div className="ov-stat-val teal">{con?.total ?? '—'}</div>
+                <div className="ov-stat-lbl">Total Contracts</div>
+              </div>
+              <div className="ov-stat-box">
+                <div className="ov-stat-val green">{con?.ongoing ?? '—'}</div>
+                <div className="ov-stat-lbl">Ongoing</div>
+              </div>
+              <div className="ov-stat-box">
+                <div className="ov-stat-val" style={{color:'#64748b'}}>{con?.expired ?? '—'}</div>
+                <div className="ov-stat-lbl">Expired</div>
+              </div>
+              <div className="ov-stat-box">
+                <div className={`ov-stat-val${(con?.expiringCritical ?? 0) > 0 ? ' red' : ' amber'}`}>{con?.expiringSoon ?? '—'}</div>
+                <div className="ov-stat-lbl">Expiring (30d)</div>
+              </div>
+            </div>
+          </a>
+
+          {/* IP */}
+          <a href="/dashboard/ip" className="ov-portal-card">
+            <div className="ov-portal-hd">
+              <div className="ov-portal-ico" style={{background:'rgba(50,30,70,.6)',border:'1px solid #3a1e4a'}}>💡</div>
+              <div>
+                <div className="ov-portal-name">IP Management</div>
+                <div className="ov-portal-sub">Trademark, Patent, Copyright</div>
+              </div>
+            </div>
+            <div className="ov-portal-stats">
+              <div className="ov-stat-box">
+                <div className="ov-stat-val teal">{ip?.total ?? '—'}</div>
+                <div className="ov-stat-lbl">Total IP</div>
+              </div>
+              <div className="ov-stat-box">
+                <div className="ov-stat-val green">{ip?.active ?? '—'}</div>
+                <div className="ov-stat-lbl">Active</div>
+              </div>
+              <div className="ov-stat-box">
+                <div className="ov-stat-val amber">{ip?.trademarks ?? '—'}</div>
+                <div className="ov-stat-lbl">Trademarks</div>
+              </div>
+              <div className="ov-stat-box">
+                <div className={`ov-stat-val${(ip?.expiringSoon ?? 0) > 0 ? ' amber' : ''}`}>{ip?.expiringSoon ?? '—'}</div>
+                <div className="ov-stat-lbl">Expiring (90d)</div>
+              </div>
+            </div>
+          </a>
         </div>
 
-        {/* ALERTS */}
-        <div className="alert-banner">
-          <div className="ab-title">⏱ Hearing Alerts</div>
-          <div className="ab-pills">
-            {loading ? (
-              <span className="ab-none">Loading alerts…</span>
-            ) : upcomingAlerts.length === 0 ? (
-              <span className="ab-none">No upcoming hearings in the next 7 days</span>
-            ) : (
-              upcomingAlerts.map(c => (
-                <AlertPill
-                  key={c.CaseID}
-                  days={daysUntil(c.NextHearingDate)}
-                  caseTitle={c.CaseTitle}
-                  court={c.CourtName}
-                />
-              ))
-            )}
+        {/* REMINDER BAR */}
+        <div className="ov-reminder-bar">
+          <div className="ov-reminder-info">
+            <strong>Email Reminders</strong>
+            Send a consolidated alert email covering critical hearings, expiring contracts, and IP renewals
+          </div>
+          <div className="ov-reminder-right">
+            <input
+              className="ov-to-input"
+              type="email"
+              placeholder="Recipient (blank = uses REMINDER_TO in .env.local)"
+              value={reminderTo}
+              onChange={e => setReminderTo(e.target.value)}
+              disabled={sending}
+            />
+            <button className="ov-send-btn" onClick={sendReminder} disabled={sending}>
+              {sending ? '⏳ Sending…' : '📧 Send'}
+            </button>
           </div>
         </div>
 
-        {/* CASE TABLE */}
-        <div className="table-card">
-          <div className="table-toolbar">
-            <div className="tt-title">Case Register</div>
-            <div className="tt-search">
-              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              <input
-                placeholder="Search by title, case no., counsel…"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-              />
-            </div>
-            <select className="tt-select" value={courtFilter} onChange={e => setCourtFilter(e.target.value)}>
-              <option value="">All Courts</option>
-              {courts.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-            <div className="filter-chips">
-              <button className={`chip${filter==='all'?' on':''}`}     onClick={() => setFilter('all')}>All {!loading && stats.total}</button>
-              <button className={`chip${filter==='pending'?' on':''}`}  onClick={() => setFilter('pending')}>Pending</button>
-              <button className={`chip${filter==='disposed'?' on':''}`} onClick={() => setFilter('disposed')}>Disposed</button>
-              <button className={`chip danger${filter==='alerts'?' on':''}`} onClick={() => setFilter('alerts')}>
-                🔴 Alerts {!loading && stats.alerts}
-              </button>
-            </div>
+        {/* ALERT SUMMARY */}
+        <div className="ov-alerts-row">
+          <div className="ov-alert-card">
+            <div className="ov-alert-title">🔴 Critical Hearings</div>
+            <div className="ov-alert-big" style={{color:'#ef4444'}}>{lit?.hearingsCritical ?? 0}</div>
+            <div className="ov-alert-desc">Hearings within 3 days requiring immediate attention</div>
           </div>
-
-          <table className="dt">
-            <thead>
-              <tr>
-                <th>Case ID</th>
-                <th>Case No.</th>
-                <th>Case Title</th>
-                <th>Court</th>
-                <th>Category</th>
-                <th>Counsel</th>
-                <th>Internal Associate</th>
-                <th>Last Hearing</th>
-                <th>Next Hearing</th>
-                <th>Status</th>
-                <th/>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr className="loading-row"><td colSpan={11}>Loading cases…</td></tr>
-              ) : cases.length === 0 ? (
-                <tr className="empty-row"><td colSpan={11}>No cases found. Add your first case using the + New Case button.</td></tr>
-              ) : (
-                cases.map(c => {
-                  const days     = daysUntil(c.NextHearingDate);
-                  const isAlert  = days <= 3;
-                  return (
-                    <tr key={c.CaseID} className={isAlert ? 'hl-row' : ''}>
-                      <td><span className="case-id">CAS-{String(c.CaseID).padStart(4,'0')}</span></td>
-                      <td style={{fontSize:'10px',color:'var(--text3)'}}>{c.CaseNumber}</td>
-                      <td style={{fontWeight:600,color:'var(--text)',maxWidth:'180px'}}>{c.CaseTitle}</td>
-                      <td><span className="court-tag">{c.CourtName}</span></td>
-                      <td>{c.CategoryName}</td>
-                      <td>{c.CounselName || '—'}</td>
-                      <td>{c.InternalAssociateName || '—'}</td>
-                      <td style={{fontSize:'10px',color:'var(--text3)'}}>{formatDate(c.LastHearingDate)}</td>
-                      <td className={isAlert ? 'date-alert' : ''}>
-                        {isAlert && '⚠ '}{formatDate(c.NextHearingDate)}
-                      </td>
-                      <td><span className={`status-pill ${statusClass(c.Status)}`}>● {c.Status}</span></td>
-                      <td><button className="action-btn">View</button></td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-
-          <div className="table-footer">
-            <div className="tf-info">
-              {loading ? 'Loading…' : `Showing ${cases.length} case${cases.length !== 1 ? 's' : ''}`}
-            </div>
+          <div className="ov-alert-card">
+            <div className="ov-alert-title">🟠 Contracts Expiring</div>
+            <div className="ov-alert-big" style={{color:'#fb923c'}}>{con?.expiringCritical ?? 0}</div>
+            <div className="ov-alert-desc">Contracts expiring within 7 days</div>
+          </div>
+          <div className="ov-alert-card">
+            <div className="ov-alert-title">🟡 IP Renewals</div>
+            <div className="ov-alert-big" style={{color:'#facc15'}}>{ip?.expiringSoon ?? 0}</div>
+            <div className="ov-alert-desc">IP records expiring within 90 days needing renewal</div>
           </div>
         </div>
+
+        {/* TOTAL EXPOSURE */}
+        {lit && (
+          <div style={{background:'#0e0e1e',border:'1px solid #1e1e3a',borderRadius:'10px',padding:'20px',marginBottom:'24px'}}>
+            <div style={{fontSize:'12px',fontWeight:600,color:'#94a3b8',marginBottom:'12px'}}>Litigation Financial Exposure</div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px'}}>
+              <div>
+                <div style={{fontSize:'11px',color:'#4a5568',marginBottom:'4px'}}>Total Amount Involved</div>
+                <div style={{fontSize:'24px',fontWeight:'800',color:'#26A9E1'}}>{fmtPKR(lit.totalAmountInvolved)}</div>
+              </div>
+              <div>
+                <div style={{fontSize:'11px',color:'#4a5568',marginBottom:'4px'}}>Total Professional Cost</div>
+                <div style={{fontSize:'24px',fontWeight:'800',color:'#4ade80'}}>{fmtPKR(lit.totalProfessionalCost)}</div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="ov-footer">Gatronova Legal Management Portal · Confidential · {new Date().getFullYear()}</div>
       </div>
     </>
   );
