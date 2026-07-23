@@ -104,12 +104,15 @@ export default function LitigationPage() {
   const [statusF,    setStatusF]    = useState('');
   const [categoryF,  setCategoryF]  = useState('');
   const [search,     setSearch]     = useState('');
-  const [newOpen,    setNewOpen]    = useState(false);
-  const [detailCase, setDetailCase] = useState<any>(null);
-  const [saving,     setSaving]     = useState(false);
-  const [form]                      = Form.useForm();
-  const [hasStay,    setHasStay]    = useState(false);
-  const searchRef                   = useRef<ReturnType<typeof setTimeout>|null>(null);
+  const [newOpen,     setNewOpen]    = useState(false);
+  const [editMode,    setEditMode]   = useState(false);
+  const [detailCase,  setDetailCase] = useState<any>(null);
+  const [saving,      setSaving]     = useState(false);
+  const [form]                       = Form.useForm();
+  const [hasStay,     setHasStay]    = useState(false);
+  const [attachments, setAttachments]= useState<any[]>([]);
+  const [uploading,   setUploading]  = useState<string|null>(null);
+  const searchRef                    = useRef<ReturnType<typeof setTimeout>|null>(null);
 
   /* fetch cases */
   const fetchCases = useCallback(() => {
@@ -135,6 +138,13 @@ export default function LitigationPage() {
     }).catch(()=>{});
   }, []);
 
+  useEffect(() => {
+    if (!detailCase) { setAttachments([]); return; }
+    axios.get(`/api/cases/${detailCase.CaseID}/attachments`)
+      .then(r => setAttachments(r.data.attachments ?? []))
+      .catch(() => setAttachments([]));
+  }, [detailCase]);
+
   /* chart data */
   const months   = monthly.map((m:any) => m.month);
   const mPending = monthly.map((m:any) => m.pending ?? 0);
@@ -150,19 +160,84 @@ export default function LitigationPage() {
     return d >= 0 && d <= 7;
   }).sort((a,b) => daysUntil(a.NextHearingDate)-daysUntil(b.NextHearingDate));
 
-  /* submit new case */
+  /* open edit form pre-filled */
+  async function handleEditOpen() {
+    if (!detailCase) return;
+    try {
+      const { data } = await axios.get(`/api/cases/${detailCase.CaseID}`);
+      const c = data.case;
+      const toDate = (d: any) => d ? new Date(d).toISOString().split('T')[0] : undefined;
+      form.setFieldsValue({
+        caseTitle:           c.CaseTitle,
+        caseNumber:          c.CaseNumber,
+        courtId:             c.CourtID,
+        categoryId:          c.CategoryID,
+        externalCounselId:   c.ExternalCounselID,
+        internalAssociateId: c.InternalAssociateID,
+        byAgainst:           c.ByAgainst,
+        dateOfInstitution:   toDate(c.DateOfInstitution),
+        status:              c.Status,
+        hearingStatus:       c.HearingStatus,
+        lastHearingDate:     toDate(c.LastHearingDate),
+        nextHearingDate:     toDate(c.NextHearingDate),
+        amountInvolved:      c.AmountInvolved  ? Number(c.AmountInvolved)  : undefined,
+        professionalCost:    c.ProfessionalCost? Number(c.ProfessionalCost): undefined,
+        interimStayOrder:    c.InterimStayOrder,
+        dateOfStayOrder:     toDate(c.DateOfStayOrder),
+        dateOfDisposal:      toDate(c.DateOfDisposal),
+        summary:             c.Summary,
+        remarks:             c.Remarks,
+      });
+      setHasStay(!!c.InterimStayOrder);
+      setEditMode(true);
+      setNewOpen(true);
+    } catch {
+      message.error('Failed to load case data');
+    }
+  }
+
+  /* upload attachment */
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>, docType: string) {
+    const file = e.target.files?.[0];
+    if (!file || !detailCase) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('documentType', docType);
+    setUploading(docType);
+    try {
+      await axios.post(`/api/cases/${detailCase.CaseID}/attachments`, fd);
+      message.success(`${docType} uploaded`);
+      const res = await axios.get(`/api/cases/${detailCase.CaseID}/attachments`);
+      setAttachments(res.data.attachments ?? []);
+    } catch (err: any) {
+      message.error(err.response?.data?.error ?? 'Upload failed — check Google Drive is configured');
+    } finally {
+      setUploading(null);
+      e.target.value = '';
+    }
+  }
+
+  /* submit new or edited case */
   async function handleSubmit() {
     try {
       const vals = await form.validateFields();
       setSaving(true);
       const payload = { ...vals, interimStayOrder: vals.interimStayOrder ?? false };
-      await axios.post('/api/cases', payload);
-      message.success('Case registered successfully');
+      if (editMode && detailCase) {
+        await axios.put(`/api/cases/${detailCase.CaseID}`, payload);
+        message.success('Case updated successfully');
+        setDetailCase((prev: any) => prev ? { ...prev, ...payload } : prev);
+      } else {
+        await axios.post('/api/cases', payload);
+        message.success('Case registered successfully');
+      }
       setNewOpen(false);
+      setEditMode(false);
       form.resetFields();
+      setHasStay(false);
       fetchCases();
     } catch(e: any) {
-      if (e?.response) message.error('Failed to save case');
+      if (e?.response) message.error(editMode ? 'Failed to update case' : 'Failed to save case');
     } finally { setSaving(false); }
   }
 
@@ -369,17 +444,17 @@ export default function LitigationPage() {
 
       </div>
 
-      {/* ── NEW CASE DRAWER ── */}
+      {/* ── NEW / EDIT CASE DRAWER ── */}
       <Drawer
-        title={<span style={{color:'#dde1e9',fontWeight:700}}>New Case Registration</span>}
+        title={<span style={{color:'#dde1e9',fontWeight:700}}>{editMode ? `Edit Case — ${detailCase?.CaseNumber}` : 'New Case Registration'}</span>}
         open={newOpen}
-        onClose={() => { setNewOpen(false); form.resetFields(); }}
+        onClose={() => { setNewOpen(false); setEditMode(false); form.resetFields(); setHasStay(false); }}
         width={750}
         styles={{body:{padding:'20px',background:'#0e0e1e'}, header:{background:'#0a0a18',borderBottom:'1px solid #1e1e3a'}}}
         footer={
           <div style={{display:'flex',justifyContent:'flex-end',gap:'10px'}}>
-            <Button onClick={() => { setNewOpen(false); form.resetFields(); }}>Cancel</Button>
-            <Button type="primary" loading={saving} onClick={handleSubmit}>Register Case</Button>
+            <Button onClick={() => { setNewOpen(false); setEditMode(false); form.resetFields(); setHasStay(false); }}>Cancel</Button>
+            <Button type="primary" loading={saving} onClick={handleSubmit}>{editMode ? 'Save Changes' : 'Register Case'}</Button>
           </div>
         }
       >
@@ -450,7 +525,12 @@ export default function LitigationPage() {
 
       {/* ── CASE DETAIL DRAWER ── */}
       <Drawer
-        title={<span style={{color:'#dde1e9',fontWeight:700}}>Case Detail — {detailCase?.CaseNumber}</span>}
+        title={
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',paddingRight:'8px'}}>
+            <span style={{color:'#dde1e9',fontWeight:700}}>Case Detail — {detailCase?.CaseNumber}</span>
+            <Button size="small" onClick={handleEditOpen} style={{fontSize:'12px',background:'#1a1a3a',borderColor:'#26264a',color:'#94a3b8'}}>✏ Edit</Button>
+          </div>
+        }
         open={!!detailCase}
         onClose={() => setDetailCase(null)}
         width={780}
@@ -511,15 +591,30 @@ export default function LitigationPage() {
             <div>
               <div style={{fontSize:'12px',fontWeight:600,color:'#94a3b8',marginBottom:'10px'}}>📎 Document Attachments</div>
               <div className="doc-slots">
-                {['Brief Summary','Plaint / Petition','Written Statement','Counter Affidavit','Para-wise Comments','CMA','Court Orders','Annexures'].map(slot => (
-                  <div key={slot} className="doc-slot">
-                    <span style={{fontSize:'16px'}}>📄</span>
-                    <span className="doc-slot-name">{slot}</span>
-                    <Tooltip title="Upload to Google Drive"><button className="doc-slot-btn">↑ Upload</button></Tooltip>
-                  </div>
-                ))}
+                {['Brief Summary','Plaint / Petition','Written Statement','Counter Affidavit','Para-wise Comments','CMA','Court Orders','Annexures'].map(slot => {
+                  const existing = attachments.find(a => a.DocumentType === slot);
+                  const busy = uploading === slot;
+                  return (
+                    <div key={slot} className="doc-slot">
+                      <span style={{fontSize:'16px'}}>{existing ? '✅' : '📄'}</span>
+                      <span className="doc-slot-name" style={{color: existing ? '#4ade80' : '#6b7280'}}>{slot}</span>
+                      {existing && (
+                        <a href={existing.DriveFileLink} target="_blank" rel="noreferrer"
+                          className="doc-slot-btn" style={{color:'#4ade80',borderColor:'rgba(74,222,128,.4)',textDecoration:'none',marginRight:'4px'}}>
+                          View
+                        </a>
+                      )}
+                      <Tooltip title={existing ? 'Replace file' : 'Upload to Google Drive'}>
+                        <label className="doc-slot-btn" style={{cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.6 : 1}}>
+                          {busy ? '…' : existing ? '↺' : '↑ Upload'}
+                          <input type="file" style={{display:'none'}} disabled={busy}
+                            onChange={e => handleUpload(e, slot)} />
+                        </label>
+                      </Tooltip>
+                    </div>
+                  );
+                })}
               </div>
-              <div style={{fontSize:'10px',color:'#374151',marginTop:'8px'}}>Files are uploaded to Google Drive. Set up GOOGLE_SERVICE_ACCOUNT_JSON in .env.local to enable.</div>
             </div>
           </div>
         )}

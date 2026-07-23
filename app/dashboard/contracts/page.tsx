@@ -80,11 +80,14 @@ export default function ContractsPage() {
   const [statusF,    setStatusF]    = useState('');
   const [categoryF,  setCategoryF]  = useState('');
   const [search,     setSearch]     = useState('');
-  const [newOpen,    setNewOpen]    = useState(false);
-  const [detail,     setDetail]     = useState<any>(null);
-  const [saving,     setSaving]     = useState(false);
-  const [form]                      = Form.useForm();
-  const searchRef                   = useRef<ReturnType<typeof setTimeout>|null>(null);
+  const [newOpen,     setNewOpen]    = useState(false);
+  const [editMode,    setEditMode]   = useState(false);
+  const [detail,      setDetail]     = useState<any>(null);
+  const [saving,      setSaving]     = useState(false);
+  const [form]                       = Form.useForm();
+  const [attachments, setAttachments]= useState<any[]>([]);
+  const [uploading,   setUploading]  = useState<string|null>(null);
+  const searchRef                    = useRef<ReturnType<typeof setTimeout>|null>(null);
 
   const fetchContracts = useCallback(() => {
     setLoading(true);
@@ -107,6 +110,13 @@ export default function ContractsPage() {
     axios.get('/api/lookups').then(r => { if (r.data.courts) setLookups(r.data); }).catch(()=>{});
   }, []);
 
+  useEffect(() => {
+    if (!detail) { setAttachments([]); return; }
+    axios.get(`/api/contracts/${detail.ContractID}/attachments`)
+      .then(r => setAttachments(r.data.attachments ?? []))
+      .catch(() => setAttachments([]));
+  }, [detail]);
+
   const months   = monthly.map((m:any) => m.month);
   const mOngoing = monthly.map((m:any) => m.ongoing ?? 0);
   const mExpired = monthly.map((m:any) => m.expired ?? 0);
@@ -116,17 +126,72 @@ export default function ContractsPage() {
     return d >= 0 && d <= 30 && c.Status === 'Ongoing';
   }).sort((a,b) => daysTo(a.DateOfExpiry)-daysTo(b.DateOfExpiry));
 
+  async function handleEditOpen() {
+    if (!detail) return;
+    try {
+      const { data } = await axios.get(`/api/contracts/${detail.ContractID}`);
+      const c = data.contract;
+      const toDate = (d: any) => d ? new Date(d).toISOString().split('T')[0] : undefined;
+      form.setFieldsValue({
+        contractTitle:       c.ContractTitle,
+        firstParty:          c.FirstParty,
+        secondParty:         c.SecondParty,
+        companyId:           c.CompanyID,
+        departmentId:        c.DepartmentID,
+        categoryId:          c.CategoryID,
+        externalPartyId:     c.ExternalPartyID,
+        internalAssociateId: c.InternalAssociateID,
+        effectiveDate:       toDate(c.EffectiveDate),
+        dateOfSigning:       toDate(c.DateOfSigning),
+        dateOfExpiry:        toDate(c.DateOfExpiry),
+        summary:             c.Summary,
+        remarks:             c.Remarks,
+        status:              c.Status,
+      });
+      setEditMode(true);
+      setNewOpen(true);
+    } catch {
+      message.error('Failed to load contract data');
+    }
+  }
+
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>, docType: string) {
+    const file = e.target.files?.[0];
+    if (!file || !detail) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('documentType', docType);
+    setUploading(docType);
+    try {
+      await axios.post(`/api/contracts/${detail.ContractID}/attachments`, fd);
+      message.success(`${docType} uploaded`);
+      const res = await axios.get(`/api/contracts/${detail.ContractID}/attachments`);
+      setAttachments(res.data.attachments ?? []);
+    } catch (err: any) {
+      message.error(err.response?.data?.error ?? 'Upload failed — check Google Drive is configured');
+    } finally {
+      setUploading(null);
+      e.target.value = '';
+    }
+  }
+
   async function handleSubmit() {
     try {
       const vals = await form.validateFields();
       setSaving(true);
-      await axios.post('/api/contracts', vals);
-      message.success('Contract registered successfully');
+      if (editMode && detail) {
+        await axios.put(`/api/contracts/${detail.ContractID}`, vals);
+        message.success('Contract updated successfully');
+      } else {
+        await axios.post('/api/contracts', vals);
+        message.success('Contract registered successfully');
+      }
       setNewOpen(false);
+      setEditMode(false);
       form.resetFields();
       fetchContracts();
     } catch(e:any) {
-      if (e?.response) message.error('Failed to save contract');
+      if (e?.response) message.error(editMode ? 'Failed to update contract' : 'Failed to save contract');
     } finally { setSaving(false); }
   }
 
@@ -280,17 +345,17 @@ export default function ContractsPage() {
         </div>
       </div>
 
-      {/* NEW CONTRACT DRAWER */}
+      {/* NEW / EDIT CONTRACT DRAWER */}
       <Drawer
-        title={<span style={{color:'#dde1e9',fontWeight:700}}>New Contract Registration</span>}
+        title={<span style={{color:'#dde1e9',fontWeight:700}}>{editMode ? `Edit Contract — #${detail?.ContractID}` : 'New Contract Registration'}</span>}
         open={newOpen}
-        onClose={()=>{setNewOpen(false);form.resetFields();}}
+        onClose={()=>{setNewOpen(false);setEditMode(false);form.resetFields();}}
         width={750}
         styles={{body:{padding:'20px',background:'#0e0e1e'},header:{background:'#0a0a18',borderBottom:'1px solid #1e1e3a'}}}
         footer={
           <div style={{display:'flex',justifyContent:'flex-end',gap:'10px'}}>
-            <Button onClick={()=>{setNewOpen(false);form.resetFields();}}>Cancel</Button>
-            <Button type="primary" loading={saving} onClick={handleSubmit}>Register Contract</Button>
+            <Button onClick={()=>{setNewOpen(false);setEditMode(false);form.resetFields();}}>Cancel</Button>
+            <Button type="primary" loading={saving} onClick={handleSubmit}>{editMode ? 'Save Changes' : 'Register Contract'}</Button>
           </div>
         }
       >
@@ -344,7 +409,12 @@ export default function ContractsPage() {
 
       {/* DETAIL DRAWER */}
       <Drawer
-        title={<span style={{color:'#dde1e9',fontWeight:700}}>Contract Detail — #{detail?.ContractID}</span>}
+        title={
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',paddingRight:'8px'}}>
+            <span style={{color:'#dde1e9',fontWeight:700}}>Contract Detail — #{detail?.ContractID}</span>
+            <Button size="small" onClick={handleEditOpen} style={{fontSize:'12px',background:'#1a1a3a',borderColor:'#26264a',color:'#94a3b8'}}>✏ Edit</Button>
+          </div>
+        }
         open={!!detail}
         onClose={()=>setDetail(null)}
         width={780}
@@ -403,13 +473,29 @@ export default function ContractsPage() {
             <div>
               <div style={{fontSize:'12px',fontWeight:600,color:'#94a3b8',marginBottom:'10px'}}>📎 Document Attachments</div>
               <div className="doc-slots">
-                {['Signed Contract Copy','Annexures','Addendum 1','Addendum 2','Related Agreements','Other Documents'].map(slot=>(
-                  <div key={slot} className="doc-slot">
-                    <span style={{fontSize:'16px'}}>📄</span>
-                    <span className="doc-slot-name">{slot}</span>
-                    <Tooltip title="Upload to Google Drive"><button className="doc-slot-btn">↑ Upload</button></Tooltip>
-                  </div>
-                ))}
+                {['Signed Contract Copy','Annexures','Addendum 1','Addendum 2','Related Agreements','Other Documents'].map(slot => {
+                  const existing = attachments.find(a => a.DocumentType === slot);
+                  const busy = uploading === slot;
+                  return (
+                    <div key={slot} className="doc-slot">
+                      <span style={{fontSize:'16px'}}>{existing ? '✅' : '📄'}</span>
+                      <span className="doc-slot-name" style={{color: existing ? '#4ade80' : '#6b7280'}}>{slot}</span>
+                      {existing && (
+                        <a href={existing.DriveFileLink} target="_blank" rel="noreferrer"
+                          className="doc-slot-btn" style={{color:'#4ade80',borderColor:'rgba(74,222,128,.4)',textDecoration:'none',marginRight:'4px'}}>
+                          View
+                        </a>
+                      )}
+                      <Tooltip title={existing ? 'Replace file' : 'Upload to Google Drive'}>
+                        <label className="doc-slot-btn" style={{cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.6 : 1}}>
+                          {busy ? '…' : existing ? '↺' : '↑ Upload'}
+                          <input type="file" style={{display:'none'}} disabled={busy}
+                            onChange={e => handleUpload(e, slot)} />
+                        </label>
+                      </Tooltip>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
