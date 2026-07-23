@@ -2,6 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   ConfigProvider, theme as antTheme, Drawer, Form, Input, Select,
   Button, Switch, message, Tag, Divider, Tooltip, Spin, InputNumber
@@ -95,14 +96,15 @@ const DEFAULT_COL = { sortable:true, filter:true, resizable:true, suppressHeader
 
 /* ─────────── MAIN COMPONENT ─────────── */
 export default function LitigationPage() {
+  const searchParams = useSearchParams();
   const [cases,      setCases]      = useState<any[]>([]);
   const [stats,      setStats]      = useState<any>(null);
   const [monthly,    setMonthly]    = useState<any[]>([]);
   const [lookups,    setLookups]    = useState<any>({courts:[],categories:[],externalLawyers:[],internalLawyers:[]});
   const [loading,    setLoading]    = useState(true);
-  const [courtF,     setCourtF]     = useState('');
-  const [statusF,    setStatusF]    = useState('');
-  const [categoryF,  setCategoryF]  = useState('');
+  const [courtF,     setCourtF]     = useState(searchParams.get('court')    ?? '');
+  const [statusF,    setStatusF]    = useState(searchParams.get('status')   ?? '');
+  const [categoryF,  setCategoryF]  = useState(searchParams.get('category') ?? '');
   const [search,     setSearch]     = useState('');
   const [newOpen,     setNewOpen]    = useState(false);
   const [editMode,    setEditMode]   = useState(false);

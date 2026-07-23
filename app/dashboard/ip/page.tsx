@@ -2,6 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   ConfigProvider, theme as antTheme, Drawer, Form, Input,
   Select, Button, message, Divider, Tooltip, Spin, InputNumber
@@ -82,14 +83,15 @@ const COL_DEFS = [
 const DEFAULT_COL = { sortable:true, filter:true, resizable:true, suppressHeaderMenuButton:true };
 
 export default function IPPage() {
+  const searchParams = useSearchParams();
   const [records,    setRecords]   = useState<any[]>([]);
   const [stats,      setStats]     = useState<any>(null);
   const [monthly,    setMonthly]   = useState<any[]>([]);
   const [lookups,    setLookups]   = useState<any>({companies:[],externalLawyers:[],internalLawyers:[]});
   const [loading,    setLoading]   = useState(true);
-  const [companyF,   setCompanyF]  = useState('');
-  const [categoryF,  setCategoryF] = useState('');
-  const [statusF,    setStatusF]   = useState('');
+  const [companyF,   setCompanyF]  = useState(searchParams.get('company')  ?? '');
+  const [categoryF,  setCategoryF] = useState(searchParams.get('category') ?? '');
+  const [statusF,    setStatusF]   = useState(searchParams.get('status')   ?? '');
   const [search,     setSearch]    = useState('');
   const [newOpen,     setNewOpen]   = useState(false);
   const [editMode,    setEditMode]  = useState(false);
