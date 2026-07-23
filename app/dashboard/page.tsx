@@ -22,16 +22,9 @@ export default function OverviewPage() {
     setSending(true);
     try {
       const { data } = await axios.post('/api/reminders', reminderTo ? { to: reminderTo } : {});
-      const channels: string[] = [];
-      if (data.to) channels.push(`email → ${data.to}`);
-      if (data.whatsappTo?.length) channels.push(`WhatsApp → ${data.whatsappTo.join(', ')}`);
-      if (channels.length) {
-        msgApi.success(`Reminder sent (${data.itemCount} item${data.itemCount !== 1 ? 's' : ''}): ${channels.join(' · ')}`);
-      }
-      if (data.emailError) msgApi.warning(`Email not sent: ${data.emailError}`);
-      if (data.whatsappError) msgApi.warning(`WhatsApp not sent: ${data.whatsappError}`);
+      msgApi.success(`Reminder sent to ${data.to} — ${data.itemCount} item${data.itemCount !== 1 ? 's' : ''} included`);
     } catch (err: any) {
-      msgApi.error(err?.response?.data?.error ?? 'Failed to send reminder');
+      msgApi.error(err?.response?.data?.error ?? 'Failed to send reminder email');
     } finally {
       setSending(false);
     }
@@ -225,8 +218,8 @@ export default function OverviewPage() {
         {/* REMINDER BAR */}
         <div className="ov-reminder-bar">
           <div className="ov-reminder-info">
-            <strong>Reminders — Email &amp; WhatsApp</strong>
-            Send a consolidated alert covering critical hearings, expiring contracts, and IP renewals. Email goes to the address below (or REMINDER_TO); WhatsApp goes to the number(s) configured in REMINDER_WHATSAPP_TO.
+            <strong>Email Reminders</strong>
+            Send a consolidated alert covering critical hearings, expiring contracts, and IP renewals.
           </div>
           <div className="ov-reminder-right">
             <input
